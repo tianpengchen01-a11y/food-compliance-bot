@@ -1,6 +1,6 @@
 """
 食品合规审查助手 - Streamlit 简化版
-保留 PDF 读取功能
+保留 PDF 读取功能，无需外部API
 """
 import streamlit as st
 import json
@@ -160,43 +160,14 @@ tab1, tab2 = st.tabs(["📝 文本审查", "📄 PDF 文件审查"])
 # 文本审查
 with tab1:
     st.markdown("### 输入待审查内容")
-    
-    example = st.selectbox(
-        "快速填充示例",
-        ["", "示例1：低GI声称（高风险）", "示例2：营养成分表", "示例3：宣传文案"]
-    )
-    
-    default_text = ""
-    if "低GI" in example:
-        default_text = """产品名称：慢糖饱饱低GI饼干
-
-产品声称：
-本产品采用低GI配方，GI值仅为45，适合糖尿病患者食用，具有降血糖功效。
-
-配料表：
-小麦粉、赤藓糖醇、抗性糊精、植物油、鸡蛋、食用盐"""
-    elif "营养成分" in example:
-        default_text = """营养成分表（每100g）
-能量：1500 kJ
-蛋白质：8.5 g
-脂肪：12.0 g
-  - 饱和脂肪：3.2 g
-碳水化合物：65.0 g
-  - 糖：5.0 g
-膳食纤维：12.0 g
-钠：350 mg"""
-    elif "宣传文案" in example:
-        default_text = """宣传文案：
-100%天然原料，无任何添加剂
-健康首选，营养专家力荐
-适合全家人食用
-国家认证，品质保证"""
+    st.markdown("请输入完整的食品标签或营销物料内容，系统将进行全面合规审查")
     
     text_content = st.text_area(
         "文本内容",
-        value=default_text,
-        height=200,
-        placeholder="请输入需要审查的文本内容..."
+        value="",
+        height=300,
+        placeholder="请输入需要审查的文本内容，例如：\n\n产品名称：xxx\n产品声称：xxx\n配料表：xxx\n营养成分表：xxx\n宣传文案：xxx\n\n系统将依据GB 7718、GB 28050、广告法等法规进行全面审查。",
+        key="text_input"
     )
     
     if st.button("🔍 开始审查", type="primary", key="review_text"):
