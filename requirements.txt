@@ -1,4 +1,2 @@
-streamlit==1.32.0
-langchain==1.0.3
-langchain-openai==1.0.1
-langgraph==1.0.2
+streamlit==1.38.0
+pypdf==5.1.0
