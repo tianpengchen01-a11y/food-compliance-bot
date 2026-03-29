@@ -1,11 +1,13 @@
 """
 食品合规审查助手 - Streamlit 完整版
 支持营养检测报告核对、配料表含量检查、条形码比对
+支持文本、PDF、图片多种输入格式
 """
 import streamlit as st
 import json
 import tempfile
 import re
+import os
 from io import BytesIO
 from datetime import datetime
 
@@ -17,6 +19,85 @@ st.set_page_config(
     page_icon="🔍",
     layout="wide"
 )
+
+# ============================================
+# 文件处理函数
+# ============================================
+
+def extract_pdf_text(pdf_file) -> str:
+    """从 PDF 文件提取文本"""
+    try:
+        from pypdf import PdfReader
+        
+        pdf_bytes = pdf_file.read()
+        reader = PdfReader(BytesIO(pdf_bytes))
+        
+        text_content = []
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                text_content.append(text)
+        
+        return "\n\n".join(text_content)
+    
+    except Exception as e:
+        return f"PDF 解析失败: {str(e)}"
+
+
+def extract_image_text(image_file) -> str:
+    """从图片提取文本（OCR）"""
+    try:
+        import pytesseract
+        from PIL import Image
+        
+        # 读取图片
+        image = Image.open(image_file)
+        
+        # 尝试使用中文+英文识别
+        try:
+            text = pytesseract.image_to_string(image, lang='chi_sim+eng')
+        except:
+            # 如果中文语言包不可用，尝试英文
+            try:
+                text = pytesseract.image_to_string(image, lang='eng')
+            except:
+                text = pytesseract.image_to_string(image)
+        
+        return text.strip() if text.strip() else "图片OCR未能识别出文本内容，请手动输入"
+    
+    except ImportError:
+        return "⚠️ 图片OCR功能暂不可用（需安装tesseract），请手动输入文本内容或上传PDF/文本文件"
+    except Exception as e:
+        return f"⚠️ 图片处理失败: {str(e)}，请手动输入文本内容"
+
+
+def process_uploaded_file(uploaded_file) -> str:
+    """处理上传的文件，返回提取的文本"""
+    if uploaded_file is None:
+        return ""
+    
+    file_type = uploaded_file.type
+    file_name = uploaded_file.name.lower()
+    
+    # PDF文件
+    if file_type == "application/pdf" or file_name.endswith('.pdf'):
+        return extract_pdf_text(uploaded_file)
+    
+    # 图片文件
+    elif file_type and file_type.startswith('image/'):
+        return extract_image_text(uploaded_file)
+    
+    # 文本文件
+    elif file_type == "text/plain" or file_name.endswith('.txt'):
+        return uploaded_file.read().decode('utf-8')
+    
+    else:
+        # 尝试作为文本读取
+        try:
+            return uploaded_file.read().decode('utf-8')
+        except:
+            return f"不支持的文件类型: {file_type}"
+
 
 # ============================================
 # 知识库数据（内嵌）- 更新日期：2025年3月
@@ -359,12 +440,12 @@ def parse_barcode_info(barcode: str) -> dict:
             "060-099": "美国/加拿大",
             "300-379": "法国", "380": "保加利亚", "383": "斯洛文尼亚",
             "385": "克罗地亚", "387": "波黑", "400-440": "德国",
-            "460-469": "俄罗斯", "470": "吉尔吉斯斯坦", "471": "台湾",
+            "460-469": "俄罗斯", "470": "吉尔吉斯斯坦",
             "474": "爱沙尼亚", "475": "拉脱维亚", "476": "阿塞拜疆",
             "477": "立陶宛", "478": "乌兹别克斯坦", "479": "斯里兰卡",
             "480": "菲律宾", "481": "白俄罗斯", "482": "乌克兰",
             "484": "摩尔多瓦", "485": "亚美尼亚", "486": "格鲁吉亚",
-            "487": "哈萨克斯坦", "489": "香港",
+            "487": "哈萨克斯坦",
             "500-509": "英国", "520-521": "希腊", "528": "黎巴嫩",
             "529": "塞浦路斯", "530": "阿尔巴尼亚", "531": "马其顿",
             "535": "马耳他", "539": "爱尔兰", "540-549": "比利时/卢森堡",
@@ -805,7 +886,7 @@ def review_content(content: str, nutrition_report: str = "", ingredient_list: st
         elif nw["status"] == "不合规":
             suggestions.append(f"⚠️ 「{nw['keyword']}」声称与检测数据不符：实测{nw['actual_value']}，要求{nw['requirement']}")
         elif nw["status"] == "需人工核查":
-            suggestions.append(f"📋 「{nw['keyword']}」声称需人工核查检测报告中的{nw['nutrient'] if 'nutrient' in nw else '相关营养素'}数据")
+            suggestions.append(f"📋 「{nw['keyword']}」声称需人工核查检测报告中的{nw.get('nutrient', '相关营养素')}数据")
     
     # 配料表建议
     for iw in ingredient_warnings:
@@ -824,26 +905,6 @@ def review_content(content: str, nutrition_report: str = "", ingredient_list: st
         "barcode_warnings": barcode_warnings,
         "suggestions": suggestions
     }
-
-
-def extract_pdf_text(pdf_file) -> str:
-    """从 PDF 文件提取文本"""
-    try:
-        from pypdf import PdfReader
-        
-        pdf_bytes = pdf_file.read()
-        reader = PdfReader(BytesIO(pdf_bytes))
-        
-        text_content = []
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                text_content.append(text)
-        
-        return "\n\n".join(text_content)
-    
-    except Exception as e:
-        return f"PDF 解析失败: {str(e)}"
 
 
 # ============================================
@@ -870,26 +931,82 @@ with tab1:
     )
     
     # 可选：营养检测报告
-    with st.expander("📋 营养检测报告（可选）"):
-        st.markdown("如果提供了检测报告，系统将核对营养声称是否合规；如未提供，将提示人工核查")
-        nutrition_report = st.text_area(
-            "检测报告内容",
-            value="",
-            height=100,
-            placeholder="粘贴营养检测报告的关键数据，例如：\n\n糖含量：0.3g/100g\n蛋白质含量：15.2g/100g\n脂肪含量：0.2g/100g\n...",
-            key="nutrition_input"
+    with st.expander("📋 营养检测报告（可选）", expanded=False):
+        st.markdown("💡 如果提供了检测报告，系统将核对营养声称是否合规；如未提供，将提示人工核查")
+        
+        # 选择输入方式
+        nutrition_input_method = st.radio(
+            "选择输入方式",
+            ["直接输入文本", "上传文件"],
+            key="nutrition_input_method",
+            horizontal=True
         )
+        
+        nutrition_report = ""
+        
+        if nutrition_input_method == "直接输入文本":
+            nutrition_report = st.text_area(
+                "检测报告内容",
+                value="",
+                height=100,
+                placeholder="粘贴营养检测报告的关键数据，例如：\n\n糖含量：0.3g/100g\n蛋白质含量：15.2g/100g\n脂肪含量：0.2g/100g\n...",
+                key="nutrition_text_input"
+            )
+        else:
+            nutrition_file = st.file_uploader(
+                "上传检测报告（支持 PDF、图片、文本文件）",
+                type=["pdf", "png", "jpg", "jpeg", "txt"],
+                key="nutrition_file"
+            )
+            if nutrition_file:
+                with st.spinner("正在解析文件..."):
+                    nutrition_report = process_uploaded_file(nutrition_file)
+                    if nutrition_report and not nutrition_report.startswith(("PDF 解析失败", "图片OCR失败", "不支持的文件类型", "⚠️")):
+                        st.success(f"✅ 成功提取内容（共 {len(nutrition_report)} 字符）")
+                        with st.expander("查看提取的内容"):
+                            st.text(nutrition_report[:500] + "..." if len(nutrition_report) > 500 else nutrition_report)
+                    else:
+                        st.warning(nutrition_report)
+                        nutrition_report = ""
     
     # 可选：配料表
-    with st.expander("📝 配料表（如主内容中未包含）"):
-        st.markdown("如果产品名称中强调了某种配料，系统将检查配料表中是否标注了含量")
-        ingredient_input = st.text_area(
-            "配料表内容",
-            value="",
-            height=80,
-            placeholder="粘贴配料表内容，例如：\n\n配料：小麦粉、燕麦（25%）、赤藓糖醇、植物油...",
-            key="ingredient_input"
+    with st.expander("📝 配料表（可选）", expanded=False):
+        st.markdown("💡 如果产品名称中强调了某种配料，系统将检查配料表中是否标注了含量")
+        
+        # 选择输入方式
+        ingredient_input_method = st.radio(
+            "选择输入方式",
+            ["直接输入文本", "上传文件"],
+            key="ingredient_input_method",
+            horizontal=True
         )
+        
+        ingredient_input = ""
+        
+        if ingredient_input_method == "直接输入文本":
+            ingredient_input = st.text_area(
+                "配料表内容",
+                value="",
+                height=80,
+                placeholder="粘贴配料表内容，例如：\n\n配料：小麦粉、燕麦（25%）、赤藓糖醇、植物油...",
+                key="ingredient_text_input"
+            )
+        else:
+            ingredient_file = st.file_uploader(
+                "上传配料表（支持 PDF、图片、文本文件）",
+                type=["pdf", "png", "jpg", "jpeg", "txt"],
+                key="ingredient_file"
+            )
+            if ingredient_file:
+                with st.spinner("正在解析文件..."):
+                    ingredient_input = process_uploaded_file(ingredient_file)
+                    if ingredient_input and not ingredient_input.startswith(("PDF 解析失败", "图片OCR失败", "不支持的文件类型", "⚠️")):
+                        st.success(f"✅ 成功提取内容（共 {len(ingredient_input)} 字符）")
+                        with st.expander("查看提取的内容"):
+                            st.text(ingredient_input[:500] + "..." if len(ingredient_input) > 500 else ingredient_input)
+                    else:
+                        st.warning(ingredient_input)
+                        ingredient_input = ""
     
     if st.button("🔍 开始审查", type="primary", key="review_text"):
         if not main_content.strip():
@@ -941,7 +1058,6 @@ with tab1:
                 st.markdown("#### 📋 营养声称检查")
                 for nw in result["nutrition_warnings"]:
                     status_icon = {"合规": "✅", "不合规": "❌", "需提供检测报告": "⚠️", "需人工核查": "🔍"}.get(nw.get("status", ""), "📋")
-                    status_color = {"合规": "green", "不合规": "red", "需提供检测报告": "orange", "需人工核查": "blue"}.get(nw.get("status", ""), "gray")
                     
                     with st.expander(f"{status_icon} **{nw.get('keyword', '')}** - {nw.get('claim_type', '')}（{nw.get('status', '')}）", expanded=True):
                         st.markdown(f"**声称要求**: {nw.get('requirement', '')}")
@@ -1015,10 +1131,55 @@ with tab2:
     col1, col2 = st.columns(2)
     with col1:
         with st.expander("📋 营养检测报告（可选）"):
-            nutrition_report_pdf = st.text_area("检测报告内容", value="", height=80, key="nutrition_pdf")
+            st.markdown("💡 支持 PDF、图片、文本文件")
+            
+            nutrition_input_method_pdf = st.radio(
+                "输入方式",
+                ["直接输入", "上传文件"],
+                key="nutrition_input_method_pdf",
+                horizontal=True
+            )
+            
+            nutrition_report_pdf = ""
+            
+            if nutrition_input_method_pdf == "直接输入":
+                nutrition_report_pdf = st.text_area("检测报告内容", value="", height=80, key="nutrition_text_pdf")
+            else:
+                nutrition_file_pdf = st.file_uploader(
+                    "上传检测报告",
+                    type=["pdf", "png", "jpg", "jpeg", "txt"],
+                    key="nutrition_file_pdf"
+                )
+                if nutrition_file_pdf:
+                    nutrition_report_pdf = process_uploaded_file(nutrition_file_pdf)
+                    if nutrition_report_pdf and not nutrition_report_pdf.startswith(("PDF 解析失败", "图片OCR失败", "不支持的文件类型", "⚠️")):
+                        st.success(f"✅ 提取 {len(nutrition_report_pdf)} 字符")
+    
     with col2:
-        with st.expander("📝 配料表（如PDF中未包含）"):
-            ingredient_input_pdf = st.text_area("配料表内容", value="", height=80, key="ingredient_pdf")
+        with st.expander("📝 配料表（可选）"):
+            st.markdown("💡 支持 PDF、图片、文本文件")
+            
+            ingredient_input_method_pdf = st.radio(
+                "输入方式",
+                ["直接输入", "上传文件"],
+                key="ingredient_input_method_pdf",
+                horizontal=True
+            )
+            
+            ingredient_input_pdf = ""
+            
+            if ingredient_input_method_pdf == "直接输入":
+                ingredient_input_pdf = st.text_area("配料表内容", value="", height=80, key="ingredient_text_pdf")
+            else:
+                ingredient_file_pdf = st.file_uploader(
+                    "上传配料表",
+                    type=["pdf", "png", "jpg", "jpeg", "txt"],
+                    key="ingredient_file_pdf"
+                )
+                if ingredient_file_pdf:
+                    ingredient_input_pdf = process_uploaded_file(ingredient_file_pdf)
+                    if ingredient_input_pdf and not ingredient_input_pdf.startswith(("PDF 解析失败", "图片OCR失败", "不支持的文件类型", "⚠️")):
+                        st.success(f"✅ 提取 {len(ingredient_input_pdf)} 字符")
     
     if st.button("🔍 开始审查", type="primary", key="review_pdf"):
         if not pdf_file:
